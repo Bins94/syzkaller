@@ -50,6 +50,7 @@ typedef unsigned long long uint64;
 typedef unsigned int uint32;
 typedef unsigned short uint16;
 typedef unsigned char uint8;
+typedef char byte;
 
 // exit/_exit do not necessary work (e.g. if fuzzer sets seccomp filter that prohibits exit_group).
 // Use doexit instead.  We must redefine exit to something that exists in stdlib,
@@ -141,6 +142,7 @@ static bool flag_collect_cover;
 static bool flag_dedup_cover;
 static bool flag_threaded;
 static bool flag_collide;
+static bool flag_coverage_filter;
 
 // If true, then executor should write the comparisons data to fuzzer.
 static bool flag_comparisons;
@@ -350,6 +352,8 @@ static void setup_features(char** enable, int n);
 #error "unknown OS"
 #endif
 
+#include "bitmap.h"
+
 #include "test.h"
 
 int main(int argc, char** argv)
@@ -428,6 +432,7 @@ int main(int argc, char** argv)
 			// Don't enable comps because we don't use them in the fuzzer yet.
 			cover_enable(&extra_cov, false, true);
 		}
+		init_bitmap();
 	}
 
 	int status = 0;
@@ -547,14 +552,15 @@ void receive_execute()
 	flag_comparisons = req.exec_flags & (1 << 3);
 	flag_threaded = req.exec_flags & (1 << 4);
 	flag_collide = req.exec_flags & (1 << 5);
+	flag_coverage_filter = req.exec_flags & (1 << 6);
 	flag_fault_call = req.fault_call;
 	flag_fault_nth = req.fault_nth;
 	if (!flag_threaded)
 		flag_collide = false;
-	debug("[%llums] exec opts: procid=%llu threaded=%d collide=%d cover=%d comps=%d dedup=%d fault=%d/%d/%d prog=%llu\n",
+	debug("[%llums] exec opts: procid=%llu threaded=%d collide=%d cover=%d comps=%d dedup=%d fault=%d/%d/%d prog=%llu filter=%d\n",
 	      current_time_ms() - start_time_ms, procid, flag_threaded, flag_collide,
 	      flag_collect_cover, flag_comparisons, flag_dedup_cover, flag_fault,
-	      flag_fault_call, flag_fault_nth, req.prog_size);
+	      flag_fault_call, flag_fault_nth, req.prog_size, flag_coverage_filter);
 	if (SYZ_EXECUTOR_USES_SHMEM) {
 		if (req.prog_size)
 			fail("need_prog: no program");
@@ -873,6 +879,8 @@ void write_coverage_signal(cover_t* cov, uint32* signal_count_pos, uint32* cover
 		}
 		cover_data_t sig = pc ^ prev;
 		prev = hash(pc);
+		if (flag_coverage_filter && !coverage_filter((uint64)pc))
+			continue;
 		if (dedup(sig))
 			continue;
 		write_output(sig);

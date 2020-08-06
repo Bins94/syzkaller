@@ -58,6 +58,7 @@ type RPCManagerView interface {
 	newInput(inp rpctype.RPCInput, sign signal.Signal) bool
 	candidateBatch(size int) []rpctype.RPCCandidate
 	rotateCorpus() bool
+	getWeightedPCs() bool
 }
 
 func startRPCServer(mgr *Manager) (*RPCServer, error) {
@@ -337,4 +338,12 @@ func (serv *RPCServer) shutdownInstance(name string) []byte {
 	}
 	delete(serv.fuzzers, name)
 	return fuzzer.machineInfo
+}
+
+func (serv *RPCServer) GetWeightedPCs(a *rpctype.GetWeightedPCsArgs, r *rpctype.GetWeightedPCsRes) error {
+	serv.mu.Lock()
+	defer serv.mu.Unlock()
+	enableFilter := serv.mgr.getWeightedPCs()
+	r.EnableFilter = enableFilter
+	return nil
 }

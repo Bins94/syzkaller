@@ -201,6 +201,39 @@ static int test_csum_inet_acc()
 	return 0;
 }
 
+static int test_coverage_filter()
+{
+	pcstart = 0x81000000;
+	pcend = 0x81001000;
+	pcsize = 0x1000;
+	uint32 mapsize = (pcsize >> 4) / 8 + 1;
+	byte tmp_bitmap[mapsize];
+	memset(tmp_bitmap, 0, mapsize);
+	bitmap = tmp_bitmap;
+
+	uint64 full_enable_pc = 0xffffffff81000765;
+	uint64 full_disable_pc = 0xffffffff81000627;
+	uint64 full_out_pc = 0xffffffff82000000;
+
+	uint32 enable_pc = (uint32)full_enable_pc & 0xffffffff;
+	uint32 idx = ((enable_pc - pcstart) >> 4) / 8;
+	uint32 shift = ((enable_pc - pcstart) >> 4) % 8;
+	bitmap[idx] |= (1 << shift);
+
+	if (!coverage_filter(full_enable_pc))
+		return 1;
+	if (coverage_filter(full_disable_pc))
+		return 1;
+	if (coverage_filter(full_out_pc))
+		return 1;
+
+	pcstart = 0x0;
+	pcend = 0x0;
+	pcsize = 0x0;
+	bitmap = NULL;
+	return 0;
+}
+
 static struct {
 	const char* name;
 	int (*f)();
@@ -211,6 +244,7 @@ static struct {
 #if GOOS_linux && (GOARCH_amd64 || GOARCH_ppc64 || GOARCH_ppc64le)
     {"test_kvm", test_kvm},
 #endif
+    {"test_coverage_filter", test_coverage_filter},
 };
 
 static int run_tests()

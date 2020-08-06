@@ -88,6 +88,8 @@ type Manager struct {
 	// For checking that files that we are using are not changing under us.
 	// Maps file name to modification time.
 	usedFiles map[string]time.Time
+
+	kcovFilter *CoverFilter
 }
 
 const (
@@ -182,11 +184,17 @@ func RunManager(cfg *mgrconfig.Config, target *prog.Target, sysTarget *targets.T
 		reproRequest:          make(chan chan map[string]bool),
 		usedFiles:             make(map[string]time.Time),
 		saturatedCalls:        make(map[string]bool),
+		kcovFilter:            &CoverFilter{enableFilter: false},
 	}
 
 	mgr.preloadCorpus()
 	mgr.initHTTP() // Creates HTTP server.
 	mgr.collectUsedFiles()
+
+	mgr.initKcovFilter()
+	if mgr.kcovFilter.enableFilter {
+		mgr.kcovFilter.createBitmap()
+	}
 
 	// Create RPC server for fuzzers.
 	mgr.serv, err = startRPCServer(mgr)
@@ -597,6 +605,13 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 	fwdAddr, err := inst.Forward(mgr.serv.port)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup port forwarding: %v", err)
+	}
+
+	if mgr.kcovFilter.enableFilter {
+		_, err = inst.Copy(mgr.kcovFilter.pcsBitmapPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to copy bitmap: %v", err)
+		}
 	}
 
 	fuzzerBin, err := inst.Copy(mgr.cfg.SyzFuzzerBin)

@@ -45,7 +45,7 @@ func coverToPCs(target *targets.Target, cov []uint32) []uint64 {
 	pcs := make([]uint64, 0, len(cov))
 	for _, pc := range cov {
 		fullPC := cover.RestorePC(pc, initCoverVMOffset)
-		prevPC := cover.PreviousInstructionPC(target, fullPC)
+		prevPC := cover.PreviousInstructionPC(target.Arch, fullPC)
 		pcs = append(pcs, prevPC)
 	}
 	return pcs

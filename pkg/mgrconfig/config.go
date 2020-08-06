@@ -85,6 +85,16 @@ type Config struct {
 
 	// Use KCOV coverage (default: true).
 	Cover bool `json:"cover"`
+	// Use coverage filter. Supported types of filter:
+	// "files": support specifying a file, all files in a directory or in all subdirectories,
+	// eg. "files": ["net/core/sock.c", "net/sctp/*", "net/dccp/**"].
+	// "functions": support specifying a function, all functions starting with or contain a string
+	// eg. "functions": ["foo", "bar*", "*baz*"].
+	// "pcs": specify raw PC table paths.
+	// For each 'PC', the lowest 32-bit should be the lowest 32-bit of a kernel text address.
+	// The highest 32bit is the weight of that address.
+	CovFilter json.RawMessage `json:"cover_filter"`
+
 	// Reproduce, localize and minimize crashers (default: true).
 	Reproduce bool `json:"reproduce"`
 

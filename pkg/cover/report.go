@@ -828,28 +828,48 @@ func parseFile(fn string) ([][]byte, error) {
 	return lines, nil
 }
 
-func PreviousInstructionPC(target *targets.Target, pc uint64) uint64 {
-	switch target.Arch {
+func PreviousInstructionPC(arch string, pc uint64) uint64 {
+	offset := instructionLen(arch)
+	pc -= offset
+	// THUMB instructions are 2 or 4 bytes with low bit set.
+	// ARM instructions are always 4 bytes.
+	if arch == targets.ARM {
+		return pc & ^uint64(1)
+	}
+	return pc
+}
+
+func NextInstructionPC(arch string, pc uint64) uint64 {
+	offset := instructionLen(arch)
+	pc += offset
+	// THUMB instructions are 2 or 4 bytes with low bit set.
+	// ARM instructions are always 4 bytes.
+	if arch == targets.ARM {
+		return pc & ^uint64(1)
+	}
+	return pc
+}
+
+func instructionLen(arch string) uint64 {
+	switch arch {
 	case targets.AMD64:
-		return pc - 5
+		return 5
 	case targets.I386:
-		return pc - 5
+		return 5
 	case targets.ARM64:
-		return pc - 4
+		return 4
 	case targets.ARM:
-		// THUMB instructions are 2 or 4 bytes with low bit set.
-		// ARM instructions are always 4 bytes.
-		return (pc - 3) & ^uint64(1)
+		return 3
 	case targets.PPC64LE:
-		return pc - 4
+		return 4
 	case targets.MIPS64LE:
-		return pc - 8
+		return 8
 	case targets.S390x:
-		return pc - 6
+		return 6
 	case targets.RiscV64:
-		return pc - 4
+		return 4
 	default:
-		panic(fmt.Sprintf("unknown arch %q", target.Arch))
+		panic(fmt.Sprintf("unknown arch %q", arch))
 	}
 }
 
@@ -891,6 +911,32 @@ func archCallInsn(target *targets.Target) ([][]byte, [][]byte) {
 	default:
 		panic(fmt.Sprintf("unknown arch %q", target.Arch))
 	}
+}
+
+func (rg *ReportGenerator) PCs() map[uint64][]symbolizer.Frame {
+	var allPCs []uint64
+	for _, s := range rg.symbols {
+		allPCs = append(allPCs, s.pcs...)
+	}
+	var progs []Prog
+	progs = append(progs, Prog{Data: "allPCs", PCs: allPCs})
+	// Pass a fake prog with all symbol pcs to preoareFileMap, rg.pcs will be initialized.
+	_, err := rg.prepareFileMap(progs)
+	if err != nil {
+		return nil
+	}
+	// Since pcFrame is a unexpected export type, build a Frame map to return.
+	retPCs := make(map[uint64][]symbolizer.Frame)
+	for pc, pcfs := range rg.pcs {
+		for _, pcf := range pcfs {
+			retPCs[pc] = append(retPCs[pc], symbolizer.Frame{PC: pcf.PC,
+				Func:   pcf.Func,
+				File:   pcf.File,
+				Line:   pcf.Line,
+				Inline: pcf.Inline})
+		}
+	}
+	return retPCs
 }
 
 type templateData struct {
