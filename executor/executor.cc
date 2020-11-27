@@ -50,7 +50,6 @@ typedef unsigned long long uint64;
 typedef unsigned int uint32;
 typedef unsigned short uint16;
 typedef unsigned char uint8;
-typedef char byte;
 
 // exit/_exit do not necessary work (e.g. if fuzzer sets seccomp filter that prohibits exit_group).
 // Use doexit instead.  We must redefine exit to something that exists in stdlib,
@@ -432,7 +431,7 @@ int main(int argc, char** argv)
 			// Don't enable comps because we don't use them in the fuzzer yet.
 			cover_enable(&extra_cov, false, true);
 		}
-		init_bitmap();
+		init_coverage_filter();
 	}
 
 	int status = 0;

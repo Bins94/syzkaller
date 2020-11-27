@@ -203,22 +203,22 @@ static int test_csum_inet_acc()
 
 static int test_coverage_filter()
 {
-	pcstart = 0x81000000;
-	pcend = 0x81001000;
-	pcsize = 0x1000;
-	uint32 mapsize = (pcsize >> 4) / 8 + 1;
-	byte tmp_bitmap[mapsize];
-	memset(tmp_bitmap, 0, mapsize);
-	bitmap = tmp_bitmap;
+	struct tmp_cov_filter_t {
+		uint32 pcstart = 0x81000000;
+		uint32 pcsize = 0x1000;
+		uint8 bitmap[(0x1000 >> 4) / 8 + 1];
+	} tmp_cov_filter;
+	memset(tmp_cov_filter.bitmap, 0, ((0x1000 >> 4) / 8 + 1));
+	cov_filter = (cov_filter_t*)(&tmp_cov_filter);
 
 	uint64 full_enable_pc = 0xffffffff81000765;
 	uint64 full_disable_pc = 0xffffffff81000627;
 	uint64 full_out_pc = 0xffffffff82000000;
 
 	uint32 enable_pc = (uint32)full_enable_pc & 0xffffffff;
-	uint32 idx = ((enable_pc - pcstart) >> 4) / 8;
-	uint32 shift = ((enable_pc - pcstart) >> 4) % 8;
-	bitmap[idx] |= (1 << shift);
+	uint32 idx = ((enable_pc - cov_filter->pcstart) >> 4) / 8;
+	uint32 shift = ((enable_pc - cov_filter->pcstart) >> 4) % 8;
+	cov_filter->bitmap[idx] |= (1 << shift);
 
 	if (!coverage_filter(full_enable_pc))
 		return 1;
@@ -227,10 +227,7 @@ static int test_coverage_filter()
 	if (coverage_filter(full_out_pc))
 		return 1;
 
-	pcstart = 0x0;
-	pcend = 0x0;
-	pcsize = 0x0;
-	bitmap = NULL;
+	cov_filter = NULL;
 	return 0;
 }
 
