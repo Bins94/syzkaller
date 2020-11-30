@@ -12,54 +12,55 @@ import (
 
 	"github.com/google/syzkaller/pkg/cover"
 	"github.com/google/syzkaller/pkg/log"
+	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/sys/targets"
 )
 
 type CoverFilter struct {
-	enableFilter    bool
-	kcovFilterStart uint32
-	kcovFilterSize  uint32
-	kcovFilterEnd   uint32
-	weightedPCs     map[uint32]float32
+	pcsStart    uint32
+	pcsSize     uint32
+	pcsEnd      uint32
+	weightedPCs map[uint32]float32
 
-	pcsBitmapPath      string
-	targetLittleEndian bool
-	target             *targets.Target
+	bitmapFilename string
+	target         *targets.Target
 }
 
-func (mgr *Manager) initKcovFilter() {
+func createCoverageFilter(cfg *mgrconfig.Config, target *targets.Target) (covFilterFilename string, err error) {
 	covFilterConfig := make(map[string][]string)
-	if err := json.Unmarshal(mgr.cfg.CovFilter, &covFilterConfig); err != nil {
+	if err := json.Unmarshal(cfg.CovFilter, &covFilterConfig); err != nil {
 		log.Logf(0, "no coverage filter is enabled")
-		mgr.kcovFilter.enableFilter = false
-		return
+		return "", nil
 	}
 	files := covFilterConfig["files"]
 	funcs := covFilterConfig["functions"]
 	rawPCs := covFilterConfig["pcs"]
 	if len(files) == 0 && len(funcs) == 0 && len(rawPCs) == 0 {
-		mgr.kcovFilter.enableFilter = false
-		return
+		return "", nil
 	}
-	mgr.kcovFilter.enableFilter = true
 	log.Logf(0, "initialize coverage information...")
-	if err := initCover(mgr.sysTarget, mgr.cfg.KernelObj, mgr.cfg.KernelSrc, mgr.cfg.KernelBuildSrc); err != nil {
-		log.Logf(0, "failed to generate coverage profile: %v", err)
-		log.Fatalf("coverage filter cannot be initialized without coverage profile")
+	if err = initCover(target, cfg.KernelObj, cfg.KernelSrc, cfg.KernelBuildSrc); err != nil {
+		return "", fmt.Errorf("failed to generate coverage profile: %v", err)
 	}
 
-	mgr.kcovFilter.targetLittleEndian = mgr.sysTarget.LittleEndian
-	mgr.kcovFilter.target = mgr.sysTarget
-	mgr.kcovFilter.pcsBitmapPath = mgr.cfg.Workdir + "/" + "syz-cover-bitmap"
-	mgr.kcovFilter.initWeightedPCs(files, funcs, rawPCs)
+	covFilter := CoverFilter{
+		weightedPCs:    make(map[uint32]float32),
+		target:         target,
+		bitmapFilename: cfg.Workdir + "/" + "syz-cover-bitmap",
+	}
+	err = covFilter.initWeightedPCs(files, funcs, rawPCs)
+	if err != nil {
+		return "", fmt.Errorf("failed to init coverage filter weightedPCs")
+	}
+	err = covFilter.createBitmap()
+	if err != nil {
+		return "", fmt.Errorf("failed to create coverage bitmap")
+	}
+	return covFilter.bitmapFilename, nil
 }
 
-func (mgr *Manager) getWeightedPCs() bool {
-	return mgr.kcovFilter.enableFilter
-}
-
-func (filter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []string) {
-	filter.weightedPCs = make(map[uint32]float32)
+func (covFilter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []string) error {
+	covFilter.weightedPCs = make(map[uint32]float32)
 	filesRegexp := getFileRegexp(files)
 	funcsRegexp := getFuncRegexp(functions)
 
@@ -69,6 +70,7 @@ func (filter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []strin
 		rawFile, err := os.Open(f)
 		if err != nil {
 			log.Logf(0, "failed to open raw PCs file: %v", err)
+			return err
 		}
 		for {
 			var encode uint64
@@ -78,29 +80,29 @@ func (filter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []strin
 			}
 			pc := uint32(encode & 0xffffffff)
 			weight := float32((encode >> 32) & 0xffff)
-			filter.weightedPCs[pc] = weight
+			covFilter.weightedPCs[pc] = weight
 		}
 		rawFile.Close()
 	}
 	pcs := reportGenerator.PCs()
 	for _, e := range pcs {
 		frame := e[len(e)-1]
-		fullpc := cover.NextInstructionPC(filter.target, frame.PC)
+		fullpc := cover.NextInstructionPC(covFilter.target, frame.PC)
 		pc := uint32(fullpc & 0xffffffff)
 		for _, r := range funcsRegexp {
 			if ok := r.MatchString(frame.Func); ok {
 				enabledFuncs[frame.Func] = true
-				filter.weightedPCs[pc] = 1.0
+				covFilter.weightedPCs[pc] = 1.0
 			}
 		}
 		for _, r := range filesRegexp {
 			if ok := r.MatchString(frame.File); ok {
 				enabledFiles[frame.File] = true
 				enabledFuncs[frame.Func] = true
-				filter.weightedPCs[pc] = 1.0
+				covFilter.weightedPCs[pc] = 1.0
 			}
 		}
-		if _, ok := filter.weightedPCs[pc]; ok {
+		if _, ok := covFilter.weightedPCs[pc]; ok {
 			enabledFuncs[frame.Func] = true
 		}
 	}
@@ -110,6 +112,7 @@ func (filter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []strin
 	for f := range enabledFiles {
 		log.Logf(1, "enabled file: %s", f)
 	}
+	return nil
 }
 
 func getFileRegexp(files []string) []regexp.Regexp {
@@ -170,64 +173,65 @@ func getFuncRegexp(funcs []string) []regexp.Regexp {
 	return regexps
 }
 
-func (filter *CoverFilter) createBitmap() {
-	filter.detectRegion()
-	if filter.kcovFilterSize > 0 {
+func (covFilter *CoverFilter) createBitmap() error {
+	covFilter.detectRegion()
+	if covFilter.pcsSize > 0 {
 		log.Logf(0, "coverage filter from %x to %x, size %x",
-			filter.kcovFilterStart, filter.kcovFilterEnd, filter.kcovFilterSize)
+			covFilter.pcsStart, covFilter.pcsEnd, covFilter.pcsSize)
 	} else {
-		log.Fatalf("coverage filter is enabled but nothing will be filtered")
+		return fmt.Errorf("coverage filter is enabled but nothing will be filtered")
 	}
 
-	bitmapFile, err := os.OpenFile(filter.pcsBitmapPath, os.O_RDWR|os.O_CREATE, 0644)
+	bitmapFile, err := os.OpenFile(covFilter.bitmapFilename, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		log.Fatalf("failed to open or create bitmap: %s", err)
+		return fmt.Errorf("failed to open or create bitmap: %s", err)
 	}
 	defer bitmapFile.Close()
-	bitmap := filter.bitmapBytes()
+	bitmap := covFilter.bitmapBytes()
 	_, err = bitmapFile.Write(bitmap)
 	if err != nil {
-		log.Fatalf("failed to write bitmap: %s", err)
+		return fmt.Errorf("failed to write bitmap: %s", err)
 	}
+	return nil
 }
 
-func (filter *CoverFilter) detectRegion() {
-	filter.kcovFilterStart = 0xffffffff
-	filter.kcovFilterEnd = 0x0
-	for pc := range filter.weightedPCs {
-		if pc < filter.kcovFilterStart {
-			filter.kcovFilterStart = pc
+func (covFilter *CoverFilter) detectRegion() {
+	covFilter.pcsStart = 0xffffffff
+	covFilter.pcsEnd = 0x0
+	for pc := range covFilter.weightedPCs {
+		if pc < covFilter.pcsStart {
+			covFilter.pcsStart = pc
 		}
-		if pc > filter.kcovFilterEnd {
-			filter.kcovFilterEnd = pc
+		if pc > covFilter.pcsEnd {
+			covFilter.pcsEnd = pc
 		}
 	}
 	// align
-	filter.kcovFilterStart &= 0xfffffff0
-	filter.kcovFilterEnd |= 0xf
-	filter.kcovFilterEnd++
-	filter.kcovFilterSize = 0
-	if filter.kcovFilterStart < filter.kcovFilterEnd {
-		filter.kcovFilterSize = filter.kcovFilterEnd - filter.kcovFilterStart
+	covFilter.pcsStart &= 0xfffffff0
+	covFilter.pcsEnd |= 0xf
+	covFilter.pcsEnd++
+	covFilter.pcsSize = 0
+	if covFilter.pcsStart < covFilter.pcsEnd {
+		covFilter.pcsSize = covFilter.pcsEnd - covFilter.pcsStart
 	} else {
-		filter.kcovFilterSize = 0
+		covFilter.pcsSize = 0
 	}
 }
 
-func (filter *CoverFilter) bitmapBytes() []byte {
-	// The file starts with two uint32: kcovFilterStart and kcovFilterSize,
-	// and a bitmap with size (kcovFilterSize>>4)/8 + 1 bytes follow them.
+func (covFilter *CoverFilter) bitmapBytes() []byte {
+	// The file starts with two uint32: covFilterStart and covFilterSize,
+	// and a bitmap with size (covFilterSize>>4)/8 + 1 bytes follow them.
 	start := make([]byte, 4)
-	filter.putUint32(start, filter.kcovFilterStart)
+	covFilter.putUint32(start, covFilter.pcsStart)
 	size := make([]byte, 4)
-	filter.putUint32(size, filter.kcovFilterSize)
+	covFilter.putUint32(size, covFilter.pcsSize)
 
 	// The lowest 4-bit is dropped,
 	// 8-bit = 1-byte, additional 1-byte to prevent overflow
-	bitmapSize := (filter.kcovFilterSize>>4)/8 + 1
+	bitmapSize := (covFilter.pcsSize>>4)/8 + 1
 	bitmap := make([]byte, bitmapSize)
-	for pc := range filter.weightedPCs {
-		pc -= filter.kcovFilterStart
+	for pc := range covFilter.weightedPCs {
+		pc -= covFilter.pcsStart
 		pc = pc >> 4
 		idx := pc / 8
 		shift := pc % 8
@@ -238,10 +242,18 @@ func (filter *CoverFilter) bitmapBytes() []byte {
 	return bitmap
 }
 
-func (filter *CoverFilter) putUint32(bytes []byte, value uint32) {
-	if filter.targetLittleEndian {
+func (covFilter *CoverFilter) putUint32(bytes []byte, value uint32) {
+	if covFilter.target.LittleEndian {
 		binary.LittleEndian.PutUint32(bytes, value)
 	} else {
 		binary.BigEndian.PutUint32(bytes, value)
+	}
+}
+
+func (mgr *Manager) getWeightedPCs() bool {
+	if mgr.coverFilterFilename != "" {
+		return true
+	} else {
+		return false
 	}
 }

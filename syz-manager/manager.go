@@ -89,7 +89,7 @@ type Manager struct {
 	// Maps file name to modification time.
 	usedFiles map[string]time.Time
 
-	kcovFilter *CoverFilter
+	coverFilterFilename string
 }
 
 const (
@@ -184,16 +184,15 @@ func RunManager(cfg *mgrconfig.Config, target *prog.Target, sysTarget *targets.T
 		reproRequest:          make(chan chan map[string]bool),
 		usedFiles:             make(map[string]time.Time),
 		saturatedCalls:        make(map[string]bool),
-		kcovFilter:            &CoverFilter{enableFilter: false},
 	}
 
 	mgr.preloadCorpus()
 	mgr.initHTTP() // Creates HTTP server.
 	mgr.collectUsedFiles()
 
-	mgr.initKcovFilter()
-	if mgr.kcovFilter.enableFilter {
-		mgr.kcovFilter.createBitmap()
+	mgr.coverFilterFilename, err = createCoverageFilter(mgr.cfg, mgr.sysTarget)
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
 
 	// Create RPC server for fuzzers.
@@ -607,10 +606,10 @@ func (mgr *Manager) runInstanceInner(index int, instanceName string) (*report.Re
 		return nil, fmt.Errorf("failed to setup port forwarding: %v", err)
 	}
 
-	if mgr.kcovFilter.enableFilter {
-		_, err = inst.Copy(mgr.kcovFilter.pcsBitmapPath)
+	if mgr.coverFilterFilename != "" {
+		_, err = inst.Copy(mgr.coverFilterFilename)
 		if err != nil {
-			return nil, fmt.Errorf("failed to copy bitmap: %v", err)
+			return nil, fmt.Errorf("failed to copy coverage filter bitmap: %v", err)
 		}
 	}
 
