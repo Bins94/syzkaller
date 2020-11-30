@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/syzkaller/pkg/cover"
 	"github.com/google/syzkaller/pkg/log"
+	"github.com/google/syzkaller/sys/targets"
 )
 
 type CoverFilter struct {
@@ -23,7 +24,7 @@ type CoverFilter struct {
 
 	pcsBitmapPath      string
 	targetLittleEndian bool
-	targetArch         string
+	target             *targets.Target
 }
 
 func (mgr *Manager) initKcovFilter() {
@@ -48,7 +49,7 @@ func (mgr *Manager) initKcovFilter() {
 	}
 
 	mgr.kcovFilter.targetLittleEndian = mgr.sysTarget.LittleEndian
-	mgr.kcovFilter.targetArch = mgr.sysTarget.Arch
+	mgr.kcovFilter.target = mgr.sysTarget
 	mgr.kcovFilter.pcsBitmapPath = mgr.cfg.Workdir + "/" + "syz-cover-bitmap"
 	mgr.kcovFilter.initWeightedPCs(files, funcs, rawPCs)
 }
@@ -84,7 +85,7 @@ func (filter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []strin
 	pcs := reportGenerator.PCs()
 	for _, e := range pcs {
 		frame := e[len(e)-1]
-		fullpc := cover.NextInstructionPC(filter.targetArch, frame.PC)
+		fullpc := cover.NextInstructionPC(filter.target, frame.PC)
 		pc := uint32(fullpc & 0xffffffff)
 		for _, r := range funcsRegexp {
 			if ok := r.MatchString(frame.Func); ok {

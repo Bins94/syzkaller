@@ -828,23 +828,23 @@ func parseFile(fn string) ([][]byte, error) {
 	return lines, nil
 }
 
-func PreviousInstructionPC(arch string, pc uint64) uint64 {
-	offset := instructionLen(arch)
+func PreviousInstructionPC(target *targets.Target, pc uint64) uint64 {
+	offset := instructionLen(target.Arch)
 	pc -= offset
 	// THUMB instructions are 2 or 4 bytes with low bit set.
 	// ARM instructions are always 4 bytes.
-	if arch == targets.ARM {
+	if target.Arch == targets.ARM {
 		return pc & ^uint64(1)
 	}
 	return pc
 }
 
-func NextInstructionPC(arch string, pc uint64) uint64 {
-	offset := instructionLen(arch)
+func NextInstructionPC(target *targets.Target, pc uint64) uint64 {
+	offset := instructionLen(target.Arch)
 	pc += offset
 	// THUMB instructions are 2 or 4 bytes with low bit set.
 	// ARM instructions are always 4 bytes.
-	if arch == targets.ARM {
+	if target.Arch == targets.ARM {
 		return pc & ^uint64(1)
 	}
 	return pc
