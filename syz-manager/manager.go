@@ -192,7 +192,7 @@ func RunManager(cfg *mgrconfig.Config, target *prog.Target, sysTarget *targets.T
 
 	mgr.coverFilterFilename, err = createCoverageFilter(mgr.cfg, mgr.sysTarget)
 	if err != nil {
-		log.Fatalf("%v", err)
+		log.Fatalf("failed to create coverage filter: %v", err)
 	}
 
 	// Create RPC server for fuzzers.

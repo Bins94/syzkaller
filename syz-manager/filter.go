@@ -40,7 +40,8 @@ func createCoverageFilter(cfg *mgrconfig.Config, target *targets.Target) (covFil
 	}
 	log.Logf(0, "initialize coverage information...")
 	if err = initCover(target, cfg.KernelObj, cfg.KernelSrc, cfg.KernelBuildSrc); err != nil {
-		return "", fmt.Errorf("failed to generate coverage profile: %v", err)
+		log.Logf(0, "failed to generate coverage profile: %v", err)
+		return "", err
 	}
 
 	covFilter := CoverFilter{
@@ -50,27 +51,32 @@ func createCoverageFilter(cfg *mgrconfig.Config, target *targets.Target) (covFil
 	}
 	err = covFilter.initWeightedPCs(files, funcs, rawPCs)
 	if err != nil {
-		return "", fmt.Errorf("failed to init coverage filter weightedPCs")
+		return "", err
 	}
 	err = covFilter.createBitmap()
 	if err != nil {
-		return "", fmt.Errorf("failed to create coverage bitmap")
+		return "", err
 	}
 	return covFilter.bitmapFilename, nil
 }
 
 func (covFilter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []string) error {
 	covFilter.weightedPCs = make(map[uint32]float32)
-	filesRegexp := getFileRegexp(files)
-	funcsRegexp := getFuncRegexp(functions)
+	filesRegexp, err := getRegexps(files)
+	if err != nil {
+		return err
+	}
+	funcsRegexp, err := getRegexps(functions)
+	if err != nil {
+		return err
+	}
 
 	enabledFiles := make(map[string]bool)
 	enabledFuncs := make(map[string]bool)
 	for _, f := range rawPCsFiles {
 		rawFile, err := os.Open(f)
 		if err != nil {
-			log.Logf(0, "failed to open raw PCs file: %v", err)
-			return err
+			return fmt.Errorf("failed to open raw PCs file: %v", err)
 		}
 		for {
 			var encode uint64
@@ -115,62 +121,16 @@ func (covFilter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []st
 	return nil
 }
 
-func getFileRegexp(files []string) []regexp.Regexp {
+func getRegexps(regexpStrings []string) ([]regexp.Regexp, error) {
 	var regexps []regexp.Regexp
-	// `\*{2}$` match net/dccp/**
-	rMatchDoubleStart, err := regexp.Compile(`\*{2}$`)
-	if err != nil {
-		log.Fatalf("regular expression failed: %s", err)
-	}
-	// `[^\\*]\\*$` match net/sctp/*
-	rMatchOneStart, err := regexp.Compile(`[^\*]\*$`)
-	if err != nil {
-		log.Fatalf("regular expression failed: %s", err)
-	}
-	for _, f := range files {
-		if ok1 := rMatchDoubleStart.MatchString(f); ok1 {
-			f = `^` + f[:len(f)-2]
-		} else if ok2 := rMatchOneStart.MatchString(f); ok2 {
-			f = `^` + f[:len(f)-1] + `[^\/]*$`
-		} else {
-			f = f + `$`
-		}
-		r, err := regexp.Compile(f)
+	for _, rs := range regexpStrings {
+		r, err := regexp.Compile(rs)
 		if err != nil {
-			log.Fatalf("regular expression failed: %s", err)
+			return nil, fmt.Error("failed to compile regexp: %v", err)
 		}
 		regexps = append(regexps, *r)
 	}
-	return regexps
-}
-
-func getFuncRegexp(funcs []string) []regexp.Regexp {
-	var regexps []regexp.Regexp
-	// `^[^\*].*\*$` match bar*
-	rMatchOneStart, err := regexp.Compile(`^[^\*].*\*$`)
-	if err != nil {
-		log.Fatalf("regular expression failed: %s", err)
-	}
-	// `^\*.*\*$` match *baz*
-	rMatchDoubleStart, err := regexp.Compile(`^\*.*\*$`)
-	if err != nil {
-		log.Fatalf("regular expression failed: %s", err)
-	}
-	for _, f := range funcs {
-		if ok1 := rMatchOneStart.MatchString(f); ok1 {
-			f = `^` + f[:len(f)-1]
-		} else if ok2 := rMatchDoubleStart.MatchString(f); ok2 {
-			f = f[1 : len(f)-1]
-		} else {
-			f = `^` + f + `$`
-		}
-		r, err := regexp.Compile(f)
-		if err != nil {
-			log.Fatalf("regular expression failed: %s", err)
-		}
-		regexps = append(regexps, *r)
-	}
-	return regexps
+	return regexps, nil
 }
 
 func (covFilter *CoverFilter) createBitmap() error {
