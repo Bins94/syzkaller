@@ -58,7 +58,7 @@ type RPCManagerView interface {
 	newInput(inp rpctype.RPCInput, sign signal.Signal) bool
 	candidateBatch(size int) []rpctype.RPCCandidate
 	rotateCorpus() bool
-	getWeightedPCs() bool
+	enableCoverFilter() bool
 }
 
 func startRPCServer(mgr *Manager) (*RPCServer, error) {
@@ -104,6 +104,9 @@ func (serv *RPCServer) Connect(a *rpctype.ConnectArgs, r *rpctype.ConnectRes) er
 	r.EnabledCalls = serv.configEnabledSyscalls
 	r.GitRevision = prog.GitRevision
 	r.TargetRevision = serv.target.Revision
+	if serv.mgr.enableCoverFilter() {
+		r.EnabledCoverFilter = true
+	}
 	if serv.mgr.rotateCorpus() && serv.rnd.Intn(5) == 0 {
 		// We do rotation every other time because there are no objective
 		// proofs regarding its efficiency either way.
@@ -338,12 +341,4 @@ func (serv *RPCServer) shutdownInstance(name string) []byte {
 	}
 	delete(serv.fuzzers, name)
 	return fuzzer.machineInfo
-}
-
-func (serv *RPCServer) GetWeightedPCs(a *rpctype.GetWeightedPCsArgs, r *rpctype.GetWeightedPCsRes) error {
-	serv.mu.Lock()
-	defer serv.mu.Unlock()
-	enableFilter := serv.mgr.getWeightedPCs()
-	r.EnableFilter = enableFilter
-	return nil
 }

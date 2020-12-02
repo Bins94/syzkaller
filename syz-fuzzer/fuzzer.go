@@ -269,7 +269,10 @@ func main() {
 		calls[target.Syscalls[id]] = true
 	}
 	fuzzer.choiceTable = target.BuildChoiceTable(fuzzer.corpus, calls)
-	fuzzer.getWeightedPCs()
+
+	if r.EnabledCoverFilter {
+		fuzzer.execOpts.Flags |= ipc.FlagEnableCoverageFilter
+	}
 
 	for pid := 0; pid < *flagProcs; pid++ {
 		proc, err := newProc(fuzzer, pid)
@@ -560,18 +563,5 @@ func parseOutputType(str string) OutputType {
 	default:
 		log.Fatalf("-output flag must be one of none/stdout/dmesg/file")
 		return OutputNone
-	}
-}
-
-// Currently, only use GetWeightedPCsRes to check if filter enabled.
-// Weighted PC table will not be used.
-func (fuzzer *Fuzzer) getWeightedPCs() {
-	a := &rpctype.GetWeightedPCsArgs{}
-	r := &rpctype.GetWeightedPCsRes{EnableFilter: false}
-	if err := fuzzer.manager.Call("Manager.GetWeightedPCs", a, r); err != nil {
-		log.Fatalf("Manager.GetWeightedPCs call failed: %v", err)
-	}
-	if r.EnableFilter {
-		fuzzer.execOpts.Flags |= ipc.FlagEnableCoverageFilter
 	}
 }

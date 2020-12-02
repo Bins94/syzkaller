@@ -213,10 +213,10 @@ func (covFilter *CoverFilter) putUint32(bytes []byte, value uint32) {
 	}
 }
 
-func (mgr *Manager) getWeightedPCs() bool {
+func (mgr *Manager) enableCoverFilter() bool {
+	enabledCoverFilter := false
 	if mgr.coverFilterFilename != "" {
-		return true
-	} else {
-		return false
+		enabledCoverFilter = true
 	}
+	return enabledCoverFilter
 }
