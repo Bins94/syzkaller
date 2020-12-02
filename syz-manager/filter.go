@@ -10,7 +10,6 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/google/syzkaller/pkg/cover"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/mgrconfig"
 	"github.com/google/syzkaller/sys/targets"
@@ -38,10 +37,20 @@ func createCoverageFilter(cfg *mgrconfig.Config, target *targets.Target) (covFil
 	if len(files) == 0 && len(funcs) == 0 && len(rawPCs) == 0 {
 		return "", nil
 	}
-	log.Logf(0, "initialize coverage information...")
-	if err = initCover(target, cfg.KernelObj, cfg.KernelSrc, cfg.KernelBuildSrc); err != nil {
-		log.Logf(0, "failed to generate coverage profile: %v", err)
+	filesRegexp, err := getRegexps(files)
+	if err != nil {
 		return "", err
+	}
+	funcsRegexp, err := getRegexps(funcs)
+	if err != nil {
+		return "", err
+	}
+	if len(filesRegexp) > 0 || len(funcsRegexp) > 0 {
+		log.Logf(0, "initialize coverage information...")
+		if err = initCover(target, cfg.KernelObj, cfg.KernelSrc, cfg.KernelBuildSrc); err != nil {
+			log.Logf(0, "failed to generate coverage profile: %v", err)
+			return "", err
+		}
 	}
 
 	covFilter := CoverFilter{
@@ -49,7 +58,7 @@ func createCoverageFilter(cfg *mgrconfig.Config, target *targets.Target) (covFil
 		target:         target,
 		bitmapFilename: cfg.Workdir + "/" + "syz-cover-bitmap",
 	}
-	err = covFilter.initWeightedPCs(files, funcs, rawPCs)
+	err = covFilter.initWeightedPCs(filesRegexp, funcsRegexp, rawPCs)
 	if err != nil {
 		return "", err
 	}
@@ -60,19 +69,7 @@ func createCoverageFilter(cfg *mgrconfig.Config, target *targets.Target) (covFil
 	return covFilter.bitmapFilename, nil
 }
 
-func (covFilter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []string) error {
-	covFilter.weightedPCs = make(map[uint32]float32)
-	filesRegexp, err := getRegexps(files)
-	if err != nil {
-		return err
-	}
-	funcsRegexp, err := getRegexps(functions)
-	if err != nil {
-		return err
-	}
-
-	enabledFiles := make(map[string]bool)
-	enabledFuncs := make(map[string]bool)
+func (covFilter *CoverFilter) initWeightedPCs(filesRegexp, funcsRegexp []regexp.Regexp, rawPCsFiles []string) error {
 	for _, f := range rawPCsFiles {
 		rawFile, err := os.Open(f)
 		if err != nil {
@@ -90,33 +87,38 @@ func (covFilter *CoverFilter) initWeightedPCs(files, functions, rawPCsFiles []st
 		}
 		rawFile.Close()
 	}
-	pcs := reportGenerator.PCs()
-	for _, e := range pcs {
-		frame := e[len(e)-1]
-		fullpc := cover.NextInstructionPC(covFilter.target, frame.PC)
-		pc := uint32(fullpc & 0xffffffff)
-		for _, r := range funcsRegexp {
-			if ok := r.MatchString(frame.Func); ok {
-				enabledFuncs[frame.Func] = true
-				covFilter.weightedPCs[pc] = 1.0
+
+	enabledFuncs := make(map[string]bool)
+	enabledFiles := make(map[string]bool)
+	if len(filesRegexp) > 0 || len(funcsRegexp) > 0 {
+		if reportGenerator == nil {
+			return fmt.Errorf("ReportGenerator used without initialization")
+		}
+		pcs := make([]uint64, 0)
+		symNames, cuNames, symPCs := reportGenerator.GetSymbolsInfo()
+		for i, symName := range symNames {
+			for _, r := range funcsRegexp {
+				if ok := r.MatchString(symName); ok {
+					enabledFuncs[symName] = true
+					pcs = append(pcs, symPCs[i]...)
+				}
+			}
+			for _, r := range filesRegexp {
+				if ok := r.MatchString(cuNames[i]); ok {
+					enabledFiles[cuNames[i]] = true
+					pcs = append(pcs, symPCs[i]...)
+				}
 			}
 		}
-		for _, r := range filesRegexp {
-			if ok := r.MatchString(frame.File); ok {
-				enabledFiles[frame.File] = true
-				enabledFuncs[frame.Func] = true
-				covFilter.weightedPCs[pc] = 1.0
-			}
-		}
-		if _, ok := covFilter.weightedPCs[pc]; ok {
-			enabledFuncs[frame.Func] = true
+		for _, pc := range pcs {
+			covFilter.weightedPCs[uint32(pc)] = 1.0
 		}
 	}
-	for f := range enabledFuncs {
-		log.Logf(1, "enabled func: %s", f)
+	for f, _ := range enabledFuncs {
+		log.Logf(0, "enabled kernel function: %s", f)
 	}
-	for f := range enabledFiles {
-		log.Logf(1, "enabled file: %s", f)
+	for f, _ := range enabledFiles {
+		log.Logf(0, "enabled kernel file: %s", f)
 	}
 	return nil
 }
@@ -126,7 +128,7 @@ func getRegexps(regexpStrings []string) ([]regexp.Regexp, error) {
 	for _, rs := range regexpStrings {
 		r, err := regexp.Compile(rs)
 		if err != nil {
-			return nil, fmt.Error("failed to compile regexp: %v", err)
+			return nil, fmt.Errorf("failed to compile regexp: %v", err)
 		}
 		regexps = append(regexps, *r)
 	}

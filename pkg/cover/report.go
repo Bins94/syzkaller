@@ -326,6 +326,15 @@ func (rg *ReportGenerator) lazySymbolize(files map[string]*file, progs []Prog) e
 	return nil
 }
 
+func (rg *ReportGenerator) GetSymbolsInfo() (symName []string, cuName []string, pcs [][]uint64) {
+	for _, sym := range rg.symbols {
+		symName = append(symName, sym.name)
+		cuName = append(cuName, sym.unit.name)
+		pcs = append(pcs, sym.pcs)
+	}
+	return symName, cuName, pcs
+}
+
 func getFile(files map[string]*file, name, filename string) *file {
 	f := files[name]
 	if f == nil {
@@ -911,32 +920,6 @@ func archCallInsn(target *targets.Target) ([][]byte, [][]byte) {
 	default:
 		panic(fmt.Sprintf("unknown arch %q", target.Arch))
 	}
-}
-
-func (rg *ReportGenerator) PCs() map[uint64][]symbolizer.Frame {
-	var allPCs []uint64
-	for _, s := range rg.symbols {
-		allPCs = append(allPCs, s.pcs...)
-	}
-	var progs []Prog
-	progs = append(progs, Prog{Data: "allPCs", PCs: allPCs})
-	// Pass a fake prog with all symbol pcs to preoareFileMap, rg.pcs will be initialized.
-	_, err := rg.prepareFileMap(progs)
-	if err != nil {
-		return nil
-	}
-	// Since pcFrame is a unexpected export type, build a Frame map to return.
-	retPCs := make(map[uint64][]symbolizer.Frame)
-	for pc, pcfs := range rg.pcs {
-		for _, pcf := range pcfs {
-			retPCs[pc] = append(retPCs[pc], symbolizer.Frame{PC: pcf.PC,
-				Func:   pcf.Func,
-				File:   pcf.File,
-				Line:   pcf.Line,
-				Inline: pcf.Inline})
-		}
-	}
-	return retPCs
 }
 
 type templateData struct {
