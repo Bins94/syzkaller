@@ -35,7 +35,7 @@ static void init_coverage_filter()
 	cov_filter = (cov_filter_t*)mmap(preferred, st.st_size, PROT_READ, MAP_PRIVATE, f, 0);
 	if (cov_filter != preferred)
 		fail("failed to initialize coverage filter bitmap at %p", preferred);
-	if ((uint32)st.st_size != sizeof(uint32) * 2 + (cov_filter->pcsize >> 4) / 8 + 1)
+	if ((uint32)st.st_size != sizeof(uint32) * 2 + ((cov_filter->pcsize >> 4) + 7) / 8)
 		fail("bad coverage filter bitmap size");
 	close(f);
 #endif

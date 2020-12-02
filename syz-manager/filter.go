@@ -105,6 +105,7 @@ func (covFilter *CoverFilter) initWeightedPCs(filesRegexp, funcsRegexp []regexp.
 			}
 			for _, r := range filesRegexp {
 				if ok := r.MatchString(cuNames[i]); ok {
+					enabledFuncs[symName] = true
 					enabledFiles[cuNames[i]] = true
 					pcs = append(pcs, symPCs[i]...)
 				}
@@ -144,7 +145,7 @@ func (covFilter *CoverFilter) createBitmap() error {
 		return fmt.Errorf("coverage filter is enabled but nothing will be filtered")
 	}
 
-	bitmapFile, err := os.OpenFile(covFilter.bitmapFilename, os.O_RDWR|os.O_CREATE, 0644)
+	bitmapFile, err := os.OpenFile(covFilter.bitmapFilename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open or create bitmap: %s", err)
 	}
@@ -182,7 +183,7 @@ func (covFilter *CoverFilter) detectRegion() {
 
 func (covFilter *CoverFilter) bitmapBytes() []byte {
 	// The file starts with two uint32: covFilterStart and covFilterSize,
-	// and a bitmap with size (covFilterSize>>4)/8 + 1 bytes follow them.
+	// and a bitmap with size ((covFilterSize>>4) + 7)/8 bytes follow them.
 	start := make([]byte, 4)
 	covFilter.putUint32(start, covFilter.pcsStart)
 	size := make([]byte, 4)
@@ -190,7 +191,7 @@ func (covFilter *CoverFilter) bitmapBytes() []byte {
 
 	// The lowest 4-bit is dropped,
 	// 8-bit = 1-byte, additional 1-byte to prevent overflow
-	bitmapSize := (covFilter.pcsSize>>4)/8 + 1
+	bitmapSize := ((covFilter.pcsSize >> 4) + 7) / 8
 	bitmap := make([]byte, bitmapSize)
 	for pc := range covFilter.weightedPCs {
 		pc -= covFilter.pcsStart
