@@ -93,7 +93,7 @@ type Config struct {
 	// "pcs": specify raw PC table paths.
 	// For each 'PC', the lowest 32-bit should be the lowest 32-bit of a kernel text address.
 	// The highest 32bit is the weight of that address.
-	CovFilter json.RawMessage `json:"cover_filter"`
+	CovFilter covFilterCfg `json:"cover_filter"`
 
 	// Reproduce, localize and minimize crashers (default: true).
 	Reproduce bool `json:"reproduce"`
@@ -126,4 +126,10 @@ type Config struct {
 	SyzFuzzerBin   string `json:"-"`
 	SyzExecprogBin string `json:"-"`
 	SyzExecutorBin string `json:"-"`
+}
+
+type covFilterCfg struct {
+	Files     []string `json:"files"`
+	Functions []string `json:"functions"`
+	RawPCs    []string `json:"pcs"`
 }

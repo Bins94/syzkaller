@@ -5,7 +5,6 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -26,14 +25,14 @@ type CoverFilter struct {
 }
 
 func createCoverageFilter(cfg *mgrconfig.Config, target *targets.Target) (covFilterFilename string, err error) {
-	covFilterConfig := make(map[string][]string)
-	if err := json.Unmarshal(cfg.CovFilter, &covFilterConfig); err != nil {
-		log.Logf(0, "no coverage filter is enabled")
-		return "", nil
-	}
-	files := covFilterConfig["files"]
-	funcs := covFilterConfig["functions"]
-	rawPCs := covFilterConfig["pcs"]
+	//covFilterConfig := make(map[string][]string)
+	//if err := json.Unmarshal(cfg.CovFilter, &covFilterConfig); err != nil {
+	//	log.Logf(0, "no coverage filter is enabled")
+	//	return "", nil
+	//}
+	files := cfg.CovFilter.Files
+	funcs := cfg.CovFilter.Functions
+	rawPCs := cfg.CovFilter.RawPCs
 	if len(files) == 0 && len(funcs) == 0 && len(rawPCs) == 0 {
 		return "", nil
 	}
