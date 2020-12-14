@@ -122,6 +122,7 @@ func (mgr *Manager) collectStats() []UIStat {
 			Value: fmt.Sprintf("%v / %v (%v%%)",
 				rawStats["filtered coverage"], len(mgr.coverFilter),
 				rawStats["filtered coverage"]*100/uint64(len(mgr.coverFilter))),
+			Link: "/cover?filter=yes",
 		})
 	}
 	delete(rawStats, "signal")
@@ -226,6 +227,18 @@ func (mgr *Manager) httpCover(w http.ResponseWriter, r *http.Request) {
 
 func (mgr *Manager) httpCoverCover(w http.ResponseWriter, r *http.Request,
 	rg *cover.ReportGenerator, do func(io.Writer, []cover.Prog) error) {
+	ifFilter := func(cover []uint32) []uint32 { return cover }
+	if filter := r.FormValue("filter"); filter == "yes" && mgr.coverFilter != nil {
+		ifFilter = func(cover []uint32) (ret []uint32) {
+			pcs := coverToPCs(rg, cover)
+			for i, pc := range pcs {
+				if mgr.coverFilter[uint32(pc)] != 0 {
+					ret = append(ret, cover[i])
+				}
+			}
+			return ret
+		}
+	}
 	var progs []cover.Prog
 	if sig := r.FormValue("input"); sig != "" {
 		inp := mgr.corpus[sig]
@@ -241,7 +254,7 @@ func (mgr *Manager) httpCoverCover(w http.ResponseWriter, r *http.Request,
 			}
 			progs = append(progs, cover.Prog{
 				Data: string(inp.Prog),
-				PCs:  coverToPCs(rg, inp.Cover),
+				PCs:  coverToPCs(rg, ifFilter(inp.Cover)),
 			})
 		}
 	}
